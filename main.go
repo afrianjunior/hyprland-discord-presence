@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"io/ioutil"
+	"strings"
 	"time"
 
 	"github.com/hugolgst/rich-go/client"
@@ -36,6 +37,21 @@ func init() {
 	flag.Parse()
 
 	startTime = time.Now()
+}
+
+func getDistName() (string, error) {
+	data, err := ioutil.ReadFile("/etc/os-release")
+	if err != nil {
+		return "", fmt.Errorf("failed to read /etc/os-release: %w", err)
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "NAME=") {
+			return strings.Trim(line[len("NAME="):], `"`), nil
+		}
+	}
+
+	return "Unknown", fmt.Errorf("distribution name not found in /etc/os-release")
 }
 
 func getHyprlandSocketPath() string {
@@ -84,10 +100,10 @@ func getActiveWindowDetails() (*ActiveWindow, error) {
 	return &window, nil
 }
 
-func updateDiscordPresence(activeWindow string) {
+func updateDiscordPresence(activeWindow, distName string) {
 	err := client.SetActivity(client.Activity{
 		State:      activeWindow,
-		Details:    "Using Hyprland on NixOS",
+		Details:    fmt.Sprintf("Using Hyprland on %s", distName),
 		LargeImage: "hyprland-dark",
 		LargeText:  "Hyprland",
 		Timestamps: &client.Timestamps{
@@ -99,12 +115,12 @@ func updateDiscordPresence(activeWindow string) {
 	}
 }
 
-func debounceUpdate(activeWindow string) {
+func debounceUpdate(activeWindow, distName string) {
 	if debounceTimer != nil {
 		debounceTimer.Stop()
 	}
 	debounceTimer = time.AfterFunc(2000*time.Millisecond, func() {
-		updateDiscordPresence(activeWindow)
+		updateDiscordPresence(activeWindow, distName)
 	})
 }
 
@@ -135,7 +151,14 @@ func listenForActiveWindowChanges() {
 		}
 
 		activeWindow := getActiveWindowTitle(window.Title, window.Class)
-		debounceUpdate(activeWindow)
+
+		distName, err := getDistName()
+		if err != nil {
+			fmt.Println("Error detecting distribution:", err)
+			distName = "Unknown"
+		}
+
+		debounceUpdate(activeWindow, distName)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -153,8 +176,12 @@ func main() {
 	if useStream {
 		listenForActiveWindowChanges()
 	} else {
-		updateDiscordPresence("Working on something great")
+		distName, err := getDistName()
+		if err != nil {
+			fmt.Println("Error detecting distribution:", err)
+			distName = "Unknown"
+		}
+		updateDiscordPresence("Working on something great", distName)
 		select {} // Keep the program running
 	}
 }
-
